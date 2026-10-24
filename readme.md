@@ -6,7 +6,41 @@ The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS.
 
 ## News / Current State
 
-Planning only, no code.
+(latest first)
+- The Hello World runs, we see the output in the serial console.
+- Basic build environment is up: USART3 Hello World + CAN1 init compiles and links.
+
+## How to Build
+
+**Prerequisites** — one-time setup:
+
+- [arm-none-eabi toolchain](https://developer.arm.com/Tools%20and%20Software/GNU%20Toolchain) and GNU make in PATH.
+  On Windows the bundled tools from STM32CubeIDE work; run from Git Bash:
+  ```sh
+  export PATH="/c/ST/STM32CubeIDE_1.12.1/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.make.win32_2.0.200.202301161003/tools/bin:\
+/c/ST/STM32CubeIDE_1.12.1/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.10.3-2021.10.win32_1.0.200.202301161003/tools/bin:\
+$PATH"
+  ```
+- [OpenOCD](https://openocd.org/) for flashing (ST-Link v2 or FT232H as SWD adapter).
+
+**First clone:**
+```sh
+git submodule update --init
+make -C libopencm3    # build the library once
+```
+
+**Build firmware:**
+```sh
+make
+```
+
+**Flash** (FT232H SWD connected to SWCLK=PA14/pin49, SWDIO=PA13/pin46):
+
+```sh
+/c/LegacyApp/openocd/OpenOCD-20250710-0.12.0/bin/openocd -f openocd_ft232h.cfg -c "program chargepower-reducer.elf verify reset exit"
+```
+> **Note 1:** With the original firmware, the GD32 disables the SWD. Workaround: pull NRES to ground for the first flashing. Afterwards the connection worked. 
+> **Note 2:** If the GD32 chip is read-protected, use STM32CubeProgrammer to unlock it first (see Ref2).
 
 ## Approach
 
@@ -34,6 +68,8 @@ On Aliexpress, there are cheap dual CAN boards exactly for such purpose, somethi
 - [ ] Identify the SWD pins and connect programmer
     - SWCLK pin 49, PA14
     - SWDIO pin 46, PA13
+    - Boot0 pin has a pull-down (R3, 4k7) on the black board, so it will start from user flash.
+    - The original software blocks the SWD as soon as it runs. Workaround: Hold the NRES low for first flash.
 - [ ] flash and run. Maybe cubeprogrammer needed to unlock (https://openinverter.org/forum/viewtopic.php?p=80922#p80922)
 
 ### Phase 2: Analysis
