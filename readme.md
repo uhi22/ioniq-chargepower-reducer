@@ -4,6 +4,10 @@
 
 The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS. This is around 2.5C, and leads to increased battery temperature up to 50°C at the second charging stop. Not good for a long car life. So the idea is: reduce the charging current in cases where the charging time does not matter.
 
+## News / Current State
+
+Planning only, no code.
+
 ## Approach
 
 The ChargeControlModule (CCM) which lives under the driver seat is the gateway between the propulsion CAN (PCAN) and the powerline communication (PLC) of the CCS port. We can add a man-in-the-middle (MITM) on PCAN, which fakes the max current or max power which flows from the battery management system (BMS) to the CCM.
