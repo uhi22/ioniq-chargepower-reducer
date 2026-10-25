@@ -6,9 +6,8 @@ The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS.
 
 ## News / Current State
 
-(latest first)
-- The Hello World runs, we see the output in the serial console.
-- Basic build environment is up: USART3 Hello World + CAN1 init compiles and links.
+- Transmit and receive works on both CANs. Routing with modification example works.
+- Message overview from both sides is printed once a second to serial.
 
 ## How to Build
 
@@ -26,12 +25,12 @@ $PATH"
 **First clone:**
 ```sh
 git submodule update --init
-make -C libopencm3    # build the library once
+mingw32-make -C libopencm3    # build the library once
 ```
 
 **Build firmware:**
 ```sh
-make
+mingw32-make
 ```
 
 **Flash** (FT232H SWD connected to SWCLK=PA14/pin49, SWDIO=PA13/pin46):
@@ -39,8 +38,10 @@ make
 ```sh
 /c/LegacyApp/openocd/OpenOCD-20250710-0.12.0/bin/openocd -f openocd_ft232h.cfg -c "program chargepower-reducer.elf verify reset exit"
 ```
-> **Note 1:** With the original firmware, the GD32 disables the SWD. Workaround: pull NRES to ground for the first flashing. Afterwards the connection worked. 
-> **Note 2:** If the GD32 chip is read-protected, use STM32CubeProgrammer to unlock it first (see Ref2).
+> **Note 1:** The GD32 disables the SWD when software is running, for unknown reason. Workaround: pull NRES to ground and hold it for the first flashing. Try a second time, now programming and verification worked.
+> **Note 2:** Using STLink-V2 together with openocd was *not* successful.
+> **Note 3:** Using STLink-V2 with ST-LINK_CLI was only working sporadically. 
+> **Note 4:** If the GD32 chip is read-protected, use STM32CubeProgrammer to unlock it first (see Ref2). This was not required on the board which was tested in this project.
 
 ## Approach
 
@@ -60,33 +61,34 @@ On Aliexpress, there are cheap dual CAN boards exactly for such purpose, somethi
 
 ### Phase 1: Build environment and basic setup
 
-- [ ] Find an existing repo (openinverter.org?)
+- [x] Find an existing repo (openinverter.org?)
     - https://openinverter.org/forum/viewtopic.php?p=75803#p75803
     - https://github.com/jamiejones85/stm32-CANBridge
     - schematic of the "green" one: https://openinverter.org/forum/viewtopic.php?p=75807#p75807
-- [ ] setup the build chain
-- [ ] Identify the SWD pins and connect programmer
+- [x] setup the build chain
+- [x] Identify the SWD pins and connect programmer
     - SWCLK pin 49, PA14
     - SWDIO pin 46, PA13
     - Boot0 pin has a pull-down (R3, 4k7) on the black board, so it will start from user flash.
-    - The original software blocks the SWD as soon as it runs. Workaround: Hold the NRES low for first flash.
-- [ ] flash and run. Maybe cubeprogrammer needed to unlock (https://openinverter.org/forum/viewtopic.php?p=80922#p80922)
+    - The original software blocks the SWD as soon as it runs. Workaround: Hold the NRES low for first flash, this fails, but after releasing the NRES the flashing works.
+- [x] flash and run
 
 ### Phase 2: Analysis
 
-- [ ] Step 201: Configure the CAN1 for 500kBaud
+- [x] Step 201: Configure the CAN1 for 500kBaud
     - CAN1 is at pins 44+45 (PA11+PA12)
-- [ ] Step 202: Identify an UART pin for logging, and configure it to 115kBaud
-    - USART1_TX PA9 (pin 42) used on "green" board
+    - CAN2 is at pins 57+58 (PB5+PB6)
+- [x] Step 202: Identify an UART pin for logging, and configure it to 115kBaud
+    - (USART1_TX PA9 (pin 42) used on "green" board)
     - USART3_TX PB10 (pin 29) is on solder pad P2.3 on "black" board
-    - USART3_RX PB11 (pin 30) is on solder pad P2.4 on "black" board
-- [ ] Step 203: Catch all messages from CAN, and print them to the serial. One snapshot per second is sufficient.
-- [ ] Step 204: Run a charging session and record the data, together with the user-provided charge power and voltage. Find out, which CAN signal provides the power limit or current limit from BMS to CCM.
+    - (USART3_RX PB11 (pin 30) is on solder pad P2.4 on "black" board)
+- [x] Step 203: Catch all messages from CAN, and print them to the serial. One snapshot per second is sufficient.
+- [x] Step 204: Run a charging session and record the data, together with the user-provided charge power and voltage. Find out, which CAN signal provides the power limit or current limit from BMS to CCM.
 
 ### Phase 3: MITM
 
-- [ ] Step 301: Bring up the CAN2 with 500kBaud
-- [ ] Step 302: Route all messages from CAN1 to CAN2 and vice versa
+- [x] Step 301: Bring up the CAN2 with 500kBaud
+- [x] Step 302: Route all messages from CAN1 to CAN2 and vice versa
 - [ ] Step 303: Cut the CAN lines on the CCM and insert the MITM module
 - [ ] Step 304: Check whether charging still works
 - [ ] Step 305: Patch the forward path to limit the current
@@ -95,6 +97,7 @@ On Aliexpress, there are cheap dual CAN boards exactly for such purpose, somethi
 ### Phase 4: Further ideas
 
 - [ ] Use a poti on analog input to adjust the limitation
+- [ ] Brake pedal and accelerator pedal to adjust the limitation
 - [ ] Check the voltage regulator properties whether they are vehicle compatible long-term
 - [ ] ... maybe more ...
 

@@ -39,19 +39,11 @@ static void systick_setup(void)
 
 static void task_5ms(void)
 {
-    static uint16_t msg_counter = 0;
-    uint8_t data[8] = {
-        (uint8_t)(msg_counter >> 8),
-        (uint8_t)(msg_counter & 0xFF),
-        0x33, 0x44, 0x55, 0x66, 0x77, 0x88
-    };
-    can_transmit(CAN1,
-                 0x7FF,   /* CAN ID */
-                 false,   /* extended ID */
-                 false,   /* RTR */
-                 8,       /* DLC */
-                 data);
-    msg_counter++;
+    static uint16_t taskdivider;
+    taskdivider++;
+    /* just for bring-up: send some demo messages to both CAN busses */
+    //if ((taskdivider%16)==0) canhandler_sendDemoMessage_CAN1();
+    //if ((taskdivider%16)==8) canhandler_sendDemoMessage_CAN2();
 }
 
 static void task_1000ms(void)
@@ -59,7 +51,11 @@ static void task_1000ms(void)
     uint32_t uptime_s = tick_ms / 1000;
     serialhandler_puts("uptime: ");
     serialhandler_print_uint32(uptime_s);
-    serialhandler_puts("s  rx: ");
+    serialhandler_puts("s  txdrop: ");
+    serialhandler_print_uint32(nSerialTxDrop);
+    serialhandler_puts("\r\n");
+
+    serialhandler_puts("CAN1 rx: ");
     serialhandler_print_uint32(nCan1TotalReceived);
     serialhandler_puts("  dropped: ");
     serialhandler_print_uint32(nCan1Dropped);
@@ -67,17 +63,27 @@ static void task_1000ms(void)
     serialhandler_print_uint32(nCan1ReceivedFramesPerSecond);
     serialhandler_puts("  drop/s: ");
     serialhandler_print_uint32(nCan1DroppedFramesPerSecond);
-    serialhandler_puts("  txdrop: ");
-    serialhandler_print_uint32(nSerialTxDrop);
+    serialhandler_puts("\r\n");
+
+    serialhandler_puts("CAN2 rx: ");
+    serialhandler_print_uint32(nCan2TotalReceived);
+    serialhandler_puts("  dropped: ");
+    serialhandler_print_uint32(nCan2Dropped);
+    serialhandler_puts("  rx/s: ");
+    serialhandler_print_uint32(nCan2ReceivedFramesPerSecond);
+    serialhandler_puts("  drop/s: ");
+    serialhandler_print_uint32(nCan2DroppedFramesPerSecond);
     serialhandler_puts("\r\n");
 
     nCan1ReceivedFramesPerSecond = 0;
     nCan1DroppedFramesPerSecond  = 0;
+    nCan2ReceivedFramesPerSecond = 0;
+    nCan2DroppedFramesPerSecond  = 0;
 
     for (int i = 0; i < CAN1_MSG_TABLE_SIZE; i++) {
         if (!can1_msg_table[i].valid)
             continue;
-        serialhandler_puts("  [");
+        serialhandler_puts("  CAN1[");
         serialhandler_print_uint32(i);
         serialhandler_puts("] id=0x");
         serialhandler_print_hex32(can1_msg_table[i].id);
@@ -93,6 +99,28 @@ static void task_1000ms(void)
         serialhandler_print_uint32(can1_msg_table[i].rx_count);
         serialhandler_puts(" t=");
         serialhandler_print_uint32(can1_msg_table[i].timestamp_ms);
+        serialhandler_puts("ms\r\n");
+    }
+
+    for (int i = 0; i < CAN2_MSG_TABLE_SIZE; i++) {
+        if (!can2_msg_table[i].valid)
+            continue;
+        serialhandler_puts("  CAN2[");
+        serialhandler_print_uint32(i);
+        serialhandler_puts("] id=0x");
+        serialhandler_print_hex32(can2_msg_table[i].id);
+        serialhandler_puts(" dlc=");
+        serialhandler_print_uint32(can2_msg_table[i].dlc);
+        serialhandler_puts(" data=");
+        for (uint8_t b = 0; b < can2_msg_table[i].dlc; b++) {
+            serialhandler_print_hex8(can2_msg_table[i].data[b]);
+            if (b + 1 < can2_msg_table[i].dlc)
+                serialhandler_puts(" ");
+        }
+        serialhandler_puts(" cnt=");
+        serialhandler_print_uint32(can2_msg_table[i].rx_count);
+        serialhandler_puts(" t=");
+        serialhandler_print_uint32(can2_msg_table[i].timestamp_ms);
         serialhandler_puts("ms\r\n");
     }
 }
@@ -113,7 +141,8 @@ int main(void)
     while (1) {
         uint32_t now = tick_ms;
 
-        canhandler_process_rx(now);
+        canhandler_process_rx1(now);
+        canhandler_process_rx2(now);
 
         if ((now - last_5ms) >= 5) {
             last_5ms = now;
