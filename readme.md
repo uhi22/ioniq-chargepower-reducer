@@ -75,6 +75,7 @@ On Aliexpress, there are cheap dual CAN boards exactly for such purpose, somethi
 ### Phase 2: Analysis
 
 - [ ] Step 201: Configure the CAN1 for 500kBaud
+    - CAN1 is at pins 44+45 (PA11+PA12)
 - [ ] Step 202: Identify an UART pin for logging, and configure it to 115kBaud
     - USART1_TX PA9 (pin 42) used on "green" board
     - USART3_TX PB10 (pin 29) is on solder pad P2.3 on "black" board

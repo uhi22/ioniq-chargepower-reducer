@@ -1,7 +1,14 @@
 #include <libopencm3/stm32/rcc.h>
-#include <libopencm3/stm32/gpio.h>
-#include <libopencm3/stm32/usart.h>
 #include <libopencm3/stm32/can.h>
+#include <libopencm3/cm3/systick.h>
+#include <libopencm3/cm3/dwt.h>
+#include <libopencm3/cm3/scs.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include "serialhandler.h"
+#include "canhandler.h"
+
+static volatile uint32_t tick_ms = 0;
 
 /* 25 MHz HSE → PLL2 chain → 72 MHz SYSCLK, APB1 = 36 MHz */
 static void clock_setup(void)
@@ -9,67 +16,121 @@ static void clock_setup(void)
     rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE25_72MHZ]);
 }
 
-/* USART3 on PB10 (solder pad P2.3), 115200 8N1 */
-static void usart_setup(void)
+void sys_tick_handler(void)
 {
-    rcc_periph_clock_enable(RCC_GPIOB);
-    rcc_periph_clock_enable(RCC_AFIO);
-    rcc_periph_clock_enable(RCC_USART3);
-
-    gpio_set_mode(GPIOB, GPIO_MODE_OUTPUT_50_MHZ,
-                  GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO10);
-
-    usart_set_baudrate(USART3, 115200);
-    usart_set_databits(USART3, 8);
-    usart_set_stopbits(USART3, USART_STOPBITS_1);
-    usart_set_parity(USART3, USART_PARITY_NONE);
-    usart_set_flow_control(USART3, USART_FLOWCONTROL_NONE);
-    usart_set_mode(USART3, USART_MODE_TX);
-    usart_enable(USART3);
+    tick_ms++;
 }
 
-/* CAN1 on PA11/PA12 (default mapping), 500 kBaud
-   APB1=36MHz, BRP=4, TS1=13, TS2=4, SJW=1 → sample point 77.8 % */
-static void can_setup(void)
+static void dwt_setup(void)
 {
-    rcc_periph_clock_enable(RCC_GPIOA);
-    rcc_periph_clock_enable(RCC_AFIO);
-    rcc_periph_clock_enable(RCC_CAN1);
-
-    gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_50_MHZ,
-                  GPIO_CNF_OUTPUT_ALTFN_PUSHPULL, GPIO12); /* CAN1_TX */
-    gpio_set_mode(GPIOA, GPIO_MODE_INPUT,
-                  GPIO_CNF_INPUT_FLOAT, GPIO11);           /* CAN1_RX */
-
-    can_init(CAN1,
-             false,             /* TTCM */
-             true,              /* ABOM: auto bus-off recovery */
-             false,             /* AWUM */
-             false,             /* NART */
-             false,             /* RFLM */
-             false,             /* TXFP */
-             CAN_BTR_SJW_1TQ,
-             CAN_BTR_TS1_13TQ, /* BS1 = 13 */
-             CAN_BTR_TS2_4TQ,  /* BS2 = 4  */
-             4,                 /* prescaler → 500 kBaud */
-             false,             /* loopback */
-             false);            /* silent   */
+    SCS_DEMCR  |= SCS_DEMCR_TRCENA;   /* enable trace */
+    DWT_CYCCNT  = 0;
+    DWT_CTRL   |= DWT_CTRL_CYCCNTENA; /* start cycle counter */
 }
 
-static void usart_puts(const char *s)
+static void systick_setup(void)
 {
-    while (*s)
-        usart_send_blocking(USART3, *s++);
+    /* 72 MHz / 72000 = 1 kHz → 1 ms tick */
+    systick_set_reload(72000 - 1);
+    systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
+    systick_counter_enable();
+    systick_interrupt_enable();
+}
+
+static void task_5ms(void)
+{
+    static uint16_t msg_counter = 0;
+    uint8_t data[8] = {
+        (uint8_t)(msg_counter >> 8),
+        (uint8_t)(msg_counter & 0xFF),
+        0x33, 0x44, 0x55, 0x66, 0x77, 0x88
+    };
+    can_transmit(CAN1,
+                 0x7FF,   /* CAN ID */
+                 false,   /* extended ID */
+                 false,   /* RTR */
+                 8,       /* DLC */
+                 data);
+    msg_counter++;
+}
+
+static void task_1000ms(void)
+{
+    uint32_t uptime_s = tick_ms / 1000;
+    serialhandler_puts("uptime: ");
+    serialhandler_print_uint32(uptime_s);
+    serialhandler_puts("s  rx: ");
+    serialhandler_print_uint32(nCan1TotalReceived);
+    serialhandler_puts("  dropped: ");
+    serialhandler_print_uint32(nCan1Dropped);
+    serialhandler_puts("  rx/s: ");
+    serialhandler_print_uint32(nCan1ReceivedFramesPerSecond);
+    serialhandler_puts("  drop/s: ");
+    serialhandler_print_uint32(nCan1DroppedFramesPerSecond);
+    serialhandler_puts("  txdrop: ");
+    serialhandler_print_uint32(nSerialTxDrop);
+    serialhandler_puts("\r\n");
+
+    nCan1ReceivedFramesPerSecond = 0;
+    nCan1DroppedFramesPerSecond  = 0;
+
+    for (int i = 0; i < CAN1_MSG_TABLE_SIZE; i++) {
+        if (!can1_msg_table[i].valid)
+            continue;
+        serialhandler_puts("  [");
+        serialhandler_print_uint32(i);
+        serialhandler_puts("] id=0x");
+        serialhandler_print_hex32(can1_msg_table[i].id);
+        serialhandler_puts(" dlc=");
+        serialhandler_print_uint32(can1_msg_table[i].dlc);
+        serialhandler_puts(" data=");
+        for (uint8_t b = 0; b < can1_msg_table[i].dlc; b++) {
+            serialhandler_print_hex8(can1_msg_table[i].data[b]);
+            if (b + 1 < can1_msg_table[i].dlc)
+                serialhandler_puts(" ");
+        }
+        serialhandler_puts(" cnt=");
+        serialhandler_print_uint32(can1_msg_table[i].rx_count);
+        serialhandler_puts(" t=");
+        serialhandler_print_uint32(can1_msg_table[i].timestamp_ms);
+        serialhandler_puts("ms\r\n");
+    }
 }
 
 int main(void)
 {
     clock_setup();
-    usart_setup();
-    can_setup();
+    dwt_setup();
+    serialhandler_setup();
+    canhandler_setup();
+    systick_setup();
 
-    usart_puts("Hello World\r\n");
+    serialhandler_puts("Hello World\r\n");
 
-    while (1);
+    uint32_t last_5ms    = 0;
+    uint32_t last_1000ms = 0;
+
+    while (1) {
+        uint32_t now = tick_ms;
+
+        canhandler_process_rx(now);
+
+        if ((now - last_5ms) >= 5) {
+            last_5ms = now;
+            task_5ms();
+        }
+
+        if ((now - last_1000ms) >= 1000) {
+            last_1000ms = now;
+            /* bring-up only: measured ~4978us with 64/128 table entries filled.
+               For real routing, replace with a small set of chosen messages. */
+            uint32_t t0 = DWT_CYCCNT;
+            task_1000ms();
+            serialhandler_puts("task_1000ms: ");
+            serialhandler_print_uint32((DWT_CYCCNT - t0) / 72);
+            serialhandler_puts("us\r\n");
+        }
+    }
+
     return 0;
 }

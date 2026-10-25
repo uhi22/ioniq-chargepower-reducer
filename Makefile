@@ -2,7 +2,7 @@ BINARY      = chargepower-reducer
 OPENCM3_DIR = libopencm3
 LDSCRIPT    = stm32f105rb.ld
 
-SRCS = src/main.c
+SRCS = src/main.c src/serialhandler.c src/canhandler.c
 OBJS = $(SRCS:.c=.o)
 
 # stm32f105rb: Cortex-M3, soft-float, 128K flash, 64K RAM
@@ -18,7 +18,10 @@ include $(OPENCM3_DIR)/mk/gcc-config.mk
 
 .PHONY: all clean
 
-all: $(BINARY).elf $(BINARY).bin
+all: $(BINARY).elf $(BINARY).bin size
+
+size: $(BINARY).elf
+	arm-none-eabi-size $<
 
 clean:
 	rm -f $(OBJS) $(BINARY).elf $(BINARY).bin $(BINARY).hex
