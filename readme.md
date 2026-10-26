@@ -4,10 +4,26 @@
 
 The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS. This is around 2.5C, and leads to increased battery temperature up to 50°C at the second charging stop. Not good for a long car life. So the idea is: reduce the charging current in cases where the charging time does not matter.
 
-## News / Current State
+## Current State
 
-- Transmit and receive works on both CANs. Routing with modification example works.
-- Message overview from both sides is printed once a second to serial.
+**Understood** (proven on the bench with a real CCM, pyPLC as charger and a vehicle simulation, see [doc/bench-testing.md](doc/bench-testing.md) and [doc/analysislog.md](doc/analysislog.md)):
+- The target current of the CCM is **0x59C B4..B5** (LE16, 0.1 A). The CCM forwards it 1:1 as EVTargetCurrent to the charger, without own ramp, no checksum.
+- A complete charging session needs only 5 vehicle messages (0x57F, 0x597, 0x599, 0x5A3, 0x59C). For a real charger also 0x59E (remaining times, maximum power).
+- The car accepts a lower current than requested.
+
+**Implemented** (firmware runs on the board):
+- Routing CAN1 ⇄ CAN2, with diagnostics on the serial line (only the messages of interest: 0x59C, 0x599, 0x200, 0x394, 0x5E5, 0x5E9), watchdog. At full bus load (~2 210 frames/s, replay of a car trace) no frame is lost: if no TX mailbox is free, the frame waits in the RX ring.
+- Limitation of 0x59C B4..B5 to the current limit.
+- Pedal control of the limit ([doc/pedal-control.md](doc/pedal-control.md)): brake tap = delivered current −10 A, accelerator tap = delivered current +10 A, only during CurrentDemand, 30…200 A, 100 A at each session start.
+- Bench automation ([tools/](tools/)): vehicle simulation, session runner with CCM power cycle and pyPLC, fast test in ~30 s.
+
+Verified on the bench with the firmware: the vehicle requests 150 A, the charger gets 100 A. Pedal taps change the limit relative to the delivered current; with a charger limited to 150 A, a brake tap reduces the delivered current at once to 140 A.
+
+**Not yet verified:**
+- Whether the pedal signals react while the car is charging (not READY).
+- Everything in the car.
+
+**Known weak spots:** no feedback of the current limit to the driver (only serial line).
 
 ## How to Build
 
@@ -38,9 +54,15 @@ mingw32-make
 ```sh
 /c/LegacyApp/openocd/OpenOCD-20250710-0.12.0/bin/openocd -f openocd_ft232h.cfg -c "program chargepower-reducer.elf verify reset exit"
 ```
-> **Note 1:** The GD32 disables the SWD when software is running, for unknown reason. Workaround: pull NRES to ground and hold it for the first flashing. Try a second time, now programming and verification worked.
-> **Note 2:** Using STLink-V2 together with openocd was *not* successful.
-> **Note 3:** Using STLink-V2 with ST-LINK_CLI was only working sporadically. 
+Alternative with STLink-V2 and ST-LINK_CLI (from the STM32 ST-LINK Utility), using the generated .hex file:
+
+```sh
+ST-LINK_CLI.exe -c SWD -P chargepower-reducer.hex -V -Rst
+```
+
+> **Note 1:** Software can disable the SWD of the GD32 by the SWJ_CFG bits in AFIO_MAPR. These bits are write-only; a read-modify-write of AFIO_MAPR (as done for a remap) may disable SWD. The original firmware of the board disables SWD. Workaround for the first flashing: pull NRES to ground and hold it for the first flashing. Try a second time, now programming and verification worked. This firmware writes SWJ_CFG explicitly (SWD on, JTAG off), so flashing works also while it runs.
+> **Note 2:** STLink-V2 (clone): its "3.3V" pin is a supply output at only 2.8 V, not a voltage sense input, and it has no reset line connected here. The 3.3 V rail of the black board is load dependent: ~3.4 V while the controller does nothing (reset, blank flash), 3.30 V while it runs. The level difference between 2.8 V and 3.4 V makes the SWD communication unreliable. Solution: connect the STLink "3.3V" pin to the 3.3 V rail of the board. With this, ST-LINK_CLI flashing works reliably, also while the firmware runs. (Side effect: the board is side-powered by the STLink, so switching off its 12 V does not reset it completely.)
+> **Note 3:** STLink-V2 together with openocd: not retested since the fix of Note 2. Before, a failed write erased the flash, so ST-LINK_CLI is preferred.
 > **Note 4:** If the GD32 chip is read-protected, use STM32CubeProgrammer to unlock it first (see Ref2). This was not required on the board which was tested in this project.
 
 ## Approach
@@ -56,6 +78,24 @@ On Aliexpress, there are cheap dual CAN boards exactly for such purpose, somethi
 - XTAL: 25Mhz
 - Voltage regulator: 1117
 - Secondary regulator U3, "ODN"
+- Termination: 120 ohms on both CANs on the board
+
+### CAN wiring at the CCM
+
+The CAN lines are cut inside the CCM, and both sides are led out to Sub-D9 connectors: the outer CAN (car side) and the inner CAN (CCM side).
+- Original function: a bridge plug connects outer and inner CAN physically.
+- Limiter: the limiter board is plugged in between, CAN1 to the outer CAN (car), CAN2 to the inner CAN (CCM).
+
+### Power supply in the car
+
+The 12 V input of the board is not used (not really automotive capable). Instead, the 5 V of the board is connected to the internal 5 V of the CCM, whose regulator easily drives the additional ~50 mA. So the board is only powered while the CCM is.
+
+### Bus termination
+
+The CCM has no termination resistor. The black board terminates both CANs with 120 ohms. The car wiring stays unchanged; instead the board is adapted:
+
+- CAN1 (car side): the 120 ohm termination on the board is removed. The car bus already has its two terminations, so the board must not add a third one (check: 60 ohms measured between CAN-H and CAN-L with all nodes unpowered).
+- CAN2 (CCM side): the 120 ohm termination on the board stays. Board (120 ohms) ... CCM (none). This short stub has only one termination, which is acceptable at the short length and 500 kBaud.
 
 ## Feature Plan
 
@@ -89,18 +129,28 @@ On Aliexpress, there are cheap dual CAN boards exactly for such purpose, somethi
 
 - [x] Step 301: Bring up the CAN2 with 500kBaud
 - [x] Step 302: Route all messages from CAN1 to CAN2 and vice versa
-- [ ] Step 303: Cut the CAN lines on the CCM and insert the MITM module
-- [ ] Step 304: Check whether charging still works
-- [ ] Step 305: Patch the forward path to limit the current
-- [ ] Step 306: Check whether limited current is effective
+- [x] Step 303: Patch the forward path to limit the current (0x59C B4..B5)
+- [x] Step 304: Bench: verify the limitation in the firmware (`tools/benchsession.py --current 0:150,30:60` → 100 A, then 60 A)
+- [x] Step 305: Cut the CAN lines inside the CCM, and lead outer and inner CAN to Sub-D9 connectors (see "CAN wiring at the CCM")
+- [x] Step 306: Bench: verify the pedal control end-to-end (vehicle simulation sends pedal taps on 0x200 / 0x394)
+- [ ] Step 307: Car, listen only: bridge plug in place, board CAN1 connected to the car CAN in parallel; charge, press the pedals, check the serial line
+- [ ] Step 308: Insert the limiter board between the Sub-D9 connectors
+    - [x] Before: remove the CAN1 (car side) 120 ohm termination on the board, see "Bus termination"
+- [ ] Step 309: Check whether charging still works (with the default limit of 100 A)
+- [ ] Step 310: Check whether the limitation is effective (change the limit with the pedals during charging)
 
 ### Phase 4: Further ideas
 
 - [ ] Use a poti on analog input to adjust the limitation
-- [ ] Brake pedal and accelerator pedal to adjust the limitation
+- [x] Brake pedal and accelerator pedal to adjust the limitation, see [doc/pedal-control.md](doc/pedal-control.md). Verified on the bench (step 306), to be tested in the car (step 307).
+- [ ] Feedback of the current limit to the driver
+- [ ] EVMaximumPowerLimit (0x59E B6..B7) as additional lever, if a charger honors it
 - [ ] Check the voltage regulator properties whether they are vehicle compatible long-term
 - [ ] ... maybe more ...
 
+### Todo Later
+
+- [ ] Failure mode: if the board dies, the CCM is cut off from the car. Charging fails (safe), but the car may store a fault code or show a warning while driving. Manual fallback: replace the board by the bridge plug (see "CAN wiring at the CCM"). Option for an automatic fallback: a relay that bridges CAN1 and CAN2 when the board is not powered.
 
 ## References
 

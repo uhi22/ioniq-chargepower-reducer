@@ -3,10 +3,13 @@
 #include <libopencm3/cm3/systick.h>
 #include <libopencm3/cm3/dwt.h>
 #include <libopencm3/cm3/scs.h>
+#include <libopencm3/stm32/iwdg.h>
+#include <libopencm3/stm32/dbgmcu.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "serialhandler.h"
 #include "canhandler.h"
+#include "pedalhandler.h"
 
 static volatile uint32_t tick_ms = 0;
 
@@ -37,6 +40,14 @@ static void systick_setup(void)
     systick_interrupt_enable();
 }
 
+/* Independent watchdog on LSI (~40 kHz). Freezes while the core is halted by the debugger. */
+static void iwdg_setup(void)
+{
+    DBGMCU_CR |= DBGMCU_CR_IWDG_STOP;
+    iwdg_set_period_ms(100);
+    iwdg_start();
+}
+
 static void task_5ms(void)
 {
     static uint16_t taskdivider;
@@ -63,6 +74,8 @@ static void task_1000ms(void)
     serialhandler_print_uint32(nCan1ReceivedFramesPerSecond);
     serialhandler_puts("  drop/s: ");
     serialhandler_print_uint32(nCan1DroppedFramesPerSecond);
+    serialhandler_puts("  txdrop: ");
+    serialhandler_print_uint32(nCan1TxDropped);
     serialhandler_puts("\r\n");
 
     serialhandler_puts("CAN2 rx: ");
@@ -73,6 +86,29 @@ static void task_1000ms(void)
     serialhandler_print_uint32(nCan2ReceivedFramesPerSecond);
     serialhandler_puts("  drop/s: ");
     serialhandler_print_uint32(nCan2DroppedFramesPerSecond);
+    serialhandler_puts("  txdrop: ");
+    serialhandler_print_uint32(nCan2TxDropped);
+    serialhandler_puts("\r\n");
+
+    serialhandler_puts("limit: ");
+    serialhandler_print_uint32(pedal_currentLimitDeciAmps / 10);
+    serialhandler_puts("A  present: ");
+    serialhandler_print_uint32(pedal_presentCurrentDeciAmps / 10);
+    serialhandler_puts("A  limited: ");
+    serialhandler_print_uint32(nTargetCurrentLimited);
+    serialhandler_puts("  accel: ");
+    serialhandler_print_uint32(pedal_accelRaw);
+    serialhandler_puts(pedal_accelValid ? (pedal_accelPressed ? " pressed" : " released") : " missing");
+    serialhandler_puts(" taps ");
+    serialhandler_print_uint32(nAccelTaps);
+    serialhandler_puts("  brake:");
+    serialhandler_puts(pedal_brakeValid ? (pedal_brakePressed ? " pressed" : " released") : " missing");
+    serialhandler_puts(" taps ");
+    serialhandler_print_uint32(nBrakeTaps);
+    serialhandler_puts("  ignored taps: ");
+    serialhandler_print_uint32(nIgnoredTaps);
+    serialhandler_puts("  sessions: ");
+    serialhandler_print_uint32(nSessionStarts);
     serialhandler_puts("\r\n");
 
     nCan1ReceivedFramesPerSecond = 0;
@@ -132,8 +168,9 @@ int main(void)
     serialhandler_setup();
     canhandler_setup();
     systick_setup();
+    iwdg_setup();
 
-    serialhandler_puts("Hello World\r\n");
+    serialhandler_puts("Hello World. ioniq-chargepower-reducer, build " __DATE__ " " __TIME__ "\r\n");
 
     uint32_t last_5ms    = 0;
     uint32_t last_1000ms = 0;
@@ -141,8 +178,11 @@ int main(void)
     while (1) {
         uint32_t now = tick_ms;
 
+        iwdg_reset();
+
         canhandler_process_rx1(now);
         canhandler_process_rx2(now);
+        pedalhandler_mainfunction(now);
 
         if ((now - last_5ms) >= 5) {
             last_5ms = now;
@@ -151,8 +191,8 @@ int main(void)
 
         if ((now - last_1000ms) >= 1000) {
             last_1000ms = now;
-            /* bring-up only: measured ~4978us with 64/128 table entries filled.
-               For real routing, replace with a small set of chosen messages. */
+            /* duration of the serial output, printed for monitoring the main loop blocking time.
+               Only the messages of interest are in the tables (see canhandler.c, loggedIds). */
             uint32_t t0 = DWT_CYCCNT;
             task_1000ms();
             serialhandler_puts("task_1000ms: ");
