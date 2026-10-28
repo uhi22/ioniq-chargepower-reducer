@@ -19,11 +19,11 @@ The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS.
 
 Verified on the bench with the firmware: the vehicle requests 150 A, the charger gets 100 A. Pedal taps change the limit relative to the delivered current; with a charger limited to 150 A, a brake tap reduces the delivered current at once to 140 A.
 
-**Not yet verified:**
-- Whether the pedal signals react while the car is charging (not READY).
-- Everything in the car.
-
-**Known weak spots:** no feedback of the current limit to the driver (only serial line).
+**Field tested**
+- 100A initial limit works.
+- Adjusting the current via the pedals works.
+- No error messages in the car, car works as usual.
+- On serial log, we see ~2200 messages per second on vehicle side. Only ~40 messages got dropped over several minutes.
 
 ## How to Build
 
@@ -88,7 +88,7 @@ The CAN lines are cut inside the CCM, and both sides are led out to Sub-D9 conne
 
 ### Power supply in the car
 
-The 12 V input of the board is not used (not really automotive capable). Instead, the 5 V of the board is connected to the internal 5 V of the CCM, whose regulator easily drives the additional ~50 mA. So the board is only powered while the CCM is.
+The 12 V input of the board is not used (not really automotive capable). Instead, the 5 V of the board is connected to the internal 5 V of the CCM, whose regulator easily drives the additional ~50 mA. So the board is only powered while the CCM is. The actual current on the 5V supply is ~41mA (CCM connected to the CAN2 and running, CAN1 unconnected, routing software running).
 
 ### Bus termination
 
@@ -133,24 +133,25 @@ The CCM has no termination resistor. The black board terminates both CANs with 1
 - [x] Step 304: Bench: verify the limitation in the firmware (`tools/benchsession.py --current 0:150,30:60` → 100 A, then 60 A)
 - [x] Step 305: Cut the CAN lines inside the CCM, and lead outer and inner CAN to Sub-D9 connectors (see "CAN wiring at the CCM")
 - [x] Step 306: Bench: verify the pedal control end-to-end (vehicle simulation sends pedal taps on 0x200 / 0x394)
-- [ ] Step 307: Car, listen only: bridge plug in place, board CAN1 connected to the car CAN in parallel; charge, press the pedals, check the serial line
-- [ ] Step 308: Insert the limiter board between the Sub-D9 connectors
+- [skipped] Step 307: Car, listen only: bridge plug in place, board CAN1 connected to the car CAN in parallel; charge, press the pedals, check the serial line
+- [x] Step 308: Insert the limiter board between the Sub-D9 connectors
     - [x] Before: remove the CAN1 (car side) 120 ohm termination on the board, see "Bus termination"
-- [ ] Step 309: Check whether charging still works (with the default limit of 100 A)
-- [ ] Step 310: Check whether the limitation is effective (change the limit with the pedals during charging)
+- [x] Step 309: Check whether charging still works (with the default limit of 100 A)
+- [x] Step 310: Check whether the limitation is effective (change the limit with the pedals during charging)
 
 ### Phase 4: Further ideas
 
-- [ ] Use a poti on analog input to adjust the limitation
-- [x] Brake pedal and accelerator pedal to adjust the limitation, see [doc/pedal-control.md](doc/pedal-control.md). Verified on the bench (step 306), to be tested in the car (step 307).
+- [discarded] Use a poti on analog input to adjust the limitation
+- [x] Brake pedal and accelerator pedal to adjust the limitation, see [doc/pedal-control.md](doc/pedal-control.md). Verified on the bench (step 306) and in the car (step 310).
 - [ ] Feedback of the current limit to the driver
-- [ ] EVMaximumPowerLimit (0x59E B6..B7) as additional lever, if a charger honors it
-- [ ] Check the voltage regulator properties whether they are vehicle compatible long-term
+- [n/a] EVMaximumPowerLimit (0x59E B6..B7) as additional lever, if a charger honors it
+- [x] Check the voltage regulator properties whether they are vehicle compatible long-term. Solution: Do not use the 12V-to-5V-regulator from the board. Directly supply the 5V line with 5V from CCM.
+- [ ] tapping pedals is not the best user experience. Better use "change during pedal hold".
 - [ ] ... maybe more ...
 
 ### Todo Later
 
-- [ ] Failure mode: if the board dies, the CCM is cut off from the car. Charging fails (safe), but the car may store a fault code or show a warning while driving. Manual fallback: replace the board by the bridge plug (see "CAN wiring at the CCM"). Option for an automatic fallback: a relay that bridges CAN1 and CAN2 when the board is not powered.
+- [-] Failure mode: if the board dies, the CCM is cut off from the car. Charging fails (safe), but the car may store a fault code or show a warning while driving. Manual fallback: replace the board by the bridge plug (see "CAN wiring at the CCM"). Option for an automatic fallback: a relay that bridges CAN1 and CAN2 when the board is not powered. --> solution: disconnect the two SUB-D connectors from the board and plug them together.
 
 ## References
 
