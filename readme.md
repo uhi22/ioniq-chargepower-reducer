@@ -4,8 +4,8 @@
 
 The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS. This is around 2.5C, and leads to increased battery temperature up to 50°C at the second charging stop. Not good for a long car life. So the idea is: reduce the charging current in cases where the charging time does not matter.
 
-![image](doc/blackboard_original.jpg.jpg)
-![image](doc/blackboard_top_annotated.jpg.jpg)
+![image](doc/blackboard_original.jpg)
+![image](doc/blackboard_top_annotated.jpg)
 ![image](doc/blackboard_bottom_annotated.jpg)
 
 ## Current State
