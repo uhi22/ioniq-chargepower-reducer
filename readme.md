@@ -27,7 +27,7 @@ Verified on the bench with the firmware: the vehicle requests 150 A, the charger
 - 100A initial limit works.
 - Adjusting the current via the pedals works.
 - No error messages in the car, car works as usual.
-- On serial log, we see ~2200 messages per second on vehicle side. Only ~40 messages got dropped over several minutes.
+- On serial log we see the statistics, ~2200 messages per second on vehicle side. Only ~40 messages got dropped over several minutes.
 
 ## How to Build
 
