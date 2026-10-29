@@ -4,6 +4,10 @@
 
 The Hyundai Ioniq EV (28kWh) charges its battery with up to 67kW / 175A via CCS. This is around 2.5C, and leads to increased battery temperature up to 50°C at the second charging stop. Not good for a long car life. So the idea is: reduce the charging current in cases where the charging time does not matter.
 
+![image](doc/blackboard_original.jpg.jpg)
+![image](doc/blackboard_top_annotated.jpg.jpg)
+![image](doc/blackboard_bottom_annotated.jpg)
+
 ## Current State
 
 **Understood** (proven on the bench with a real CCM, pyPLC as charger and a vehicle simulation, see [doc/bench-testing.md](doc/bench-testing.md) and [doc/analysislog.md](doc/analysislog.md)):
@@ -160,3 +164,4 @@ The CCM has no termination resistor. The black board terminates both CANs with 1
 - Ref3: reverse engineering of the "green" and "blue" CAN bus filter https://dangerouspayload.com/2020/03/10/hacking-a-mileage-manipulator-can-bus-filter-device/
 - Ref4: firmware binaries of green and blue boards https://github.com/andrewkabai/universal_can_filter
 - Ref5: datasheet STM32F105 https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&ved=2ahUKEwiNwpzzitOXAxWtSfEDHeEvJPEQFnoECCcQAQ&url=https%3A%2F%2Fwww.st.com%2Fresource%2Fen%2Fdatasheet%2Fstm32f105r8.pdf&usg=AOvVaw0xi2c2MLBn8kCwDRR__5XS&opi=89978449
+- Ref6: Discussion on openinverter forum https://openinverter.org/forum/viewtopic.php?p=95293#p95293
